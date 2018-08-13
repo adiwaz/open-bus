@@ -15,6 +15,7 @@ import gtfs_utils as gu
 import gtfstk
 from collections import OrderedDict, defaultdict
 import os
+from os.path import join
 import boto3
 import logging
 from zipfile import BadZipFile
@@ -187,7 +188,8 @@ def get_active_trips_df(trip_times):
 
 
 def compute_route_stats_base_partridge(trip_stats_subset,
-                                       headway_start_time='07:00:00', headway_end_time='19:00:00', *,
+                                       headway_start_time='07:00:00',
+                                       headway_end_time='19:00:00', *,
                                        split_directions=False):
     """
     Compute stats for the given subset of trips stats.
@@ -451,12 +453,14 @@ def batch_stats(folder=GTFS_FEEDS_PATH, output_folder=OUTPUT_DIR):
     for file in os.listdir(folder):
         date_str = file.split('.')[0]
         date = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
-        feed = gu.get_partridge_feed_by_date(output_folder + file, date)
+        feed = gu.get_partridge_feed_by_date(join(output_folder, file), date)
         zones = gu.get_zones_df(LOCAL_TARIFF_PATH)
         ts = compute_trip_stats_partridge(feed, zones)
-        ts.to_pickle(output_folder + date_str + '_trip_stats.pkl.gz', compression='gzip')
+        ts.to_pickle(join(output_folder, date_str + '_trip_stats.pkl.gz'),
+                     compression='gzip')
         rs = compute_route_stats_base_partridge(ts)
-        rs.to_pickle(output_folder + date_str + '_route_stats.pkl.gz', compression='gzip')
+        rs.to_pickle(join(output_folder, date_str + '_route_stats.pkl.gz'),
+                     compression='gzip')
 
 
 def _get_existing_output_files(output_folder):
@@ -522,7 +526,8 @@ get a dictionary mapping gtfs file names to a list of dates for forward fill by 
     return ffill
 
 
-def get_valid_file_dates_dict(bucket_objects, existing_output_files, logger, forward_fill):
+def get_valid_file_dates_dict(bucket_objects, existing_output_files, logger,
+                              forward_fill):
     logger.info(f'BUCKET_VALID_FILES_RE={BUCKET_VALID_FILES_RE}')
     bucket_valid_files = get_bucket_valid_files(bucket_objects)
     if forward_fill:
@@ -576,13 +581,14 @@ def get_gtfs_file(file, gtfs_folder, bucket, logger, force=False):
     :return: whether file was downloaded or not
     :rtype: bool
     """
-    if not force and os.path.exists(gtfs_folder + file):
+    if not force and os.path.exists(join(gtfs_folder, file)):
         logger.info(f'found file "{file}" in local folder "{gtfs_folder}"')
         downloaded = False
     else:
-        logger.info(f'starting file download with retries (key="{file}", local path="{gtfs_folder+file}")')
-        s3_download(bucket, file, gtfs_folder + file, report=logger.error)
-        logger.debug(f'finished file download (key="{file}", local path="{gtfs_folder+file}")')
+        logger.info(f'starting file download with retries (key="{file}", local path="{join(gtfs_folder, file)}")')
+        s3_download(bucket, file, join(gtfs_folder, file), report=logger.error)
+        # logger.debug(f'finished file download (key="{file}", local path="{gtfs_folder+file}")')
+        logger.debug(f'finished file download (key="{file}", local path="{join(gtfs_folder, file)}")')
         downloaded = True
     # TODO: log file size
     return downloaded
@@ -610,33 +616,34 @@ and route_stats).
 
     downloaded = False
 
-    trip_stats_output_path = output_folder + date_str + '_trip_stats.pkl.gz'
+    trip_stats_output_path = join(output_folder,
+                                  date_str + '_trip_stats.pkl.gz')
     if os.path.exists(trip_stats_output_path):
         logger.info(f'found trip stats result DF gzipped pickle "{trip_stats_output_path}"')
         ts = pd.read_pickle(trip_stats_output_path, compression='gzip')
     else:
         downloaded = get_gtfs_file(file, gtfs_folder, bucket, logger)
 
-        logger.info(f'creating daily partridge feed for file "{gtfs_folder+file}" with date "{date}"')
+        logger.info(f'creating daily partridge feed for file "{join(gtfs_folder, file)}" with date "{date}"')
         try:
-            feed = gu.get_partridge_feed_by_date(gtfs_folder + file, date)
+            feed = gu.get_partridge_feed_by_date(join(gtfs_folder, file), date)
         except BadZipFile:
             logger.error('Bad local zip file', exc_info=True)
             downloaded = get_gtfs_file(file, gtfs_folder, bucket, logger, force=True)
-            feed = gu.get_partridge_feed_by_date(gtfs_folder + file, date)
+            feed = gu.get_partridge_feed_by_date(join(gtfs_folder, file), date)
 
-        logger.debug(f'finished creating daily partridge feed for file "{gtfs_folder+file}" with date "{date}"')
+        logger.debug(f'finished creating daily partridge feed for file "{join(gtfs_folder, file)}" with date "{date}"')
 
         # TODO: add changing zones from archive
         logger.info(f'creating zones DF from "{LOCAL_TARIFF_PATH}"')
         zones = gu.get_zones_df(LOCAL_TARIFF_PATH)
 
         logger.info(
-            f'starting compute_trip_stats_partridge for file "{gtfs_folder+file}" with date "{date}" and zones '
+            f'starting compute_trip_stats_partridge for file "{join(gtfs_folder, file)}" with date "{date}" and zones '
             f'"{LOCAL_TARIFF_PATH}"')
         ts = compute_trip_stats_partridge(feed, zones)
         logger.debug(
-            f'finished compute_trip_stats_partridge for file "{gtfs_folder+file}" with date "{date}" and zones '
+            f'finished compute_trip_stats_partridge for file "{join(gtfs_folder, file)}" with date "{date}" and zones '
             f'"{LOCAL_TARIFF_PATH}"')
         # TODO: log this
         ts['date'] = date_str
@@ -662,7 +669,7 @@ and route_stats).
         f'rs.shape={rs.shape}, num_trips_sum={rs.num_trips.sum()}, dc_route_id={rs.route_id.nunique()}, '
         f'num_start_zones={rs.start_zone.nunique()}, num_agency={rs.agency_name.nunique()}')
 
-    route_stats_output_path = output_folder + date_str + '_route_stats.pkl.gz'
+    route_stats_output_path = join(output_folder, date_str + '_route_stats.pkl.gz')
     logger.info(f'saving route stats result DF to gzipped pickle "{route_stats_output_path}"')
     rs.to_pickle(route_stats_output_path, compression='gzip')
 
@@ -696,10 +703,10 @@ Handle a single GTFS file. Download if necessary compute and save stats files (c
                                           gtfs_folder=gtfs_folder, logger=logger)
 
     if delete_downloaded_gtfs_zips and downloaded:
-        logger.info(f'deleting gtfs zip file "{gtfs_folder+file}"')
-        os.remove(gtfs_folder + file)
+        logger.info(f'deleting gtfs zip file "{join(gtfs_folder, file)}"')
+        os.remove(join(gtfs_folder, file))
     else:
-        logger.debug(f'keeping gtfs zip file "{gtfs_folder+file}"')
+        logger.debug(f'keeping gtfs zip file "{join(gtfs_folder, file)}"')
 
 
 def batch_stats_s3(bucket_name=BUCKET_NAME, output_folder=OUTPUT_DIR,
@@ -775,7 +782,9 @@ TODO: decorate
     logger = logging.getLogger('gtfs_stats')
     logger.setLevel(logging.DEBUG)
     # create file handler which logs even debug messages
-    fh = logging.FileHandler(LOG_FOLDER + f'gtfs_stats_{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}.log')
+    # fh = logging.FileHandler(LOG_FOLDER + f'gtfs_stats_{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}.log')
+    fh = logging.FileHandler(join(LOG_FOLDER,
+                                  f'gtfs_stats_{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}.log'))
     fh.setLevel(logging.DEBUG)
     # create console handler with a higher log level
     ch = logging.StreamHandler()
@@ -790,10 +799,27 @@ TODO: decorate
     return logger
 
 
+def mkdir_if_not_exists(dir_path):
+    """ Create the directory if it does not exist """
+    if not os.path.exists(dir_path):
+        os.makedirs(dir_path)
+
+
+def init_conf():
+    """ Init directories from conf file """
+    if not os.path.exists(BASE_FOLDER):
+        raise ValueError("Base folder does not exist")
+    for dir_path in [DATA_FOLDER, GTFS_FEEDS_PATH, OUTPUT_DIR,
+                     FILTERED_FEEDS_PATH]:
+        mkdir_if_not_exists(dir_path)
+
+
 def main():
+    init_conf()
     logger = get_logger()
     logger.info(f'starting batch_stats_s3 with default config')
-    batch_stats_s3(delete_downloaded_gtfs_zips=DELETE_DOWNLOADED_GTFS_ZIPS, logger=logger)
+    batch_stats_s3(delete_downloaded_gtfs_zips=DELETE_DOWNLOADED_GTFS_ZIPS,
+                   logger=logger)
 
 
 if __name__ == '__main__':
