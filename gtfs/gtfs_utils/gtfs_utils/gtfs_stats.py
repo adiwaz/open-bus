@@ -381,6 +381,36 @@ def compute_route_stats_base_partridge(trip_stats_subset,
     return g
 
 
+def compute_route_stats_time_cutoff(ts1, ts2, cutoff_time='00:00:00',
+                                    headway_start_time='07:00:00',
+                                    headway_end_time='19:00:00', *,
+                                    split_directions=False):
+    """ Compute route stats for a custom day cutoff, default to 00:00:00
+    ts1, ts2 should be trip_stats pandas dataframes of consecutive dates
+    (see compute_trip_stats_partridge function).
+    ts1: the "original" date, ts2: date+1.
+    """
+    # convert time strings to seconds:
+    cutoff = gtfstk.helpers.timestr_to_seconds(cutoff_time)
+    ts1_start_sec = ts1.start_time.apply(gtfstk.helpers.timestr_to_seconds)
+    ts2_start_sec = ts2.start_time.apply(gtfstk.helpers.timestr_to_seconds)
+
+    # select relevant trips:
+    f_ts1 = ts1[ts1_start_sec >= cutoff]
+    f_ts2 = ts2[ts2_start_sec < cutoff]
+    new_ts = pd.concat([f_ts1, f_ts2], sort=False, ignore_index=True)
+
+    # compute route stats
+    # TODO how to add the * from the input arguments?
+    return compute_route_stats_base_partridge(new_ts,
+                                              headway_start_time=
+                                              headway_start_time,
+                                              headway_end_time=
+                                              headway_end_time,
+                                              split_directions=
+                                              split_directions)
+
+
 def retry(delays=(0, 1, 5, 30, 180, 600, 3600),
           exception=Exception):
     """
